@@ -1,0 +1,62 @@
+{
+  "name": "practice-test",
+  "version": "1.0.0",
+  "description": "Modern desktop app for managing at-home practice tests",
+  "main": "electron/main.cjs",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k \"npm:dev:vite\" \"npm:dev:electron\"",
+    "dev:vite": "vite",
+    "dev:electron": "wait-on http://localhost:5173 && cross-env NODE_ENV=development electron .",
+    "build": "vite build",
+    "build:mac": "npm run build && electron-builder --mac",
+    "build:win": "npm run build && electron-builder --win",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.0",
+    "cross-env": "^7.0.3",
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
+    "vite": "^5.4.11",
+    "wait-on": "^8.0.1"
+  },
+  "build": {
+    "appId": "com.noahsj.practicetest",
+    "productName": "Practice Test",
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "build/icon.ico",
+      "build/icon.png",
+      "build/icon.icns"
+    ],
+    "directories": {
+      "buildResources": "build"
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.education"
+    },
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ],
+      "icon": "build/icon.ico",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Practice Test"
+    }
+  }
+}
