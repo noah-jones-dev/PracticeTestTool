@@ -226,6 +226,8 @@ function AnsweringPhase({ test, onUpdate, onFinishAnswering }) {
   const [val, setVal] = useState(existing ? existing.answer : '');
   const [bumpKey, setBumpKey] = useState(0);
   const inputRef = useRef(null);
+  const valRef = useRef(val);
+  valRef.current = val;
 
   // Clear editingIndex on mount so it doesn't stick
   useEffect(() => {
@@ -286,7 +288,7 @@ function AnsweringPhase({ test, onUpdate, onFinishAnswering }) {
   };
 
   const submit = () => {
-    const trimmed = val.trim();
+    const trimmed = (valRef.current || '').trim();
     if (!trimmed) return;
     saveAndAdvance(trimmed);
   };
@@ -294,6 +296,40 @@ function AnsweringPhase({ test, onUpdate, onFinishAnswering }) {
   const skip = () => {
     saveAndAdvance('');
   };
+
+  // Global keyboard handler:
+  //  - MC mode: letter keys A..letterFor(optionCount-1) select that option
+  //  - Both modes: Enter submits (free input also handles Enter on its focused
+  //    input directly, so this is a fallback for when the input isn't focused)
+  useEffect(() => {
+    const handler = (e) => {
+      // Don't intercept while typing into a real input/textarea
+      if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) {
+        return;
+      }
+      if (isMc) {
+        const k = (e.key || '').toUpperCase();
+        if (k.length === 1) {
+          const code = k.charCodeAt(0);
+          if (code >= 65 && code <= 64 + optionCount) {
+            e.preventDefault();
+            setVal(k);
+            return;
+          }
+        }
+      }
+      if (e.key === 'Enter') {
+        const trimmed = (valRef.current || '').trim();
+        if (trimmed) {
+          e.preventDefault();
+          saveAndAdvance(trimmed);
+        }
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMc, optionCount, cursor, test]);
 
   const setUnsure = (checked) => {
     let nextQs;
@@ -382,20 +418,26 @@ function AnsweringPhase({ test, onUpdate, onFinishAnswering }) {
         </div>
 
         {isMc ? (
-          <div className="mc-grid" data-count={optionCount}>
-            {Array.from({ length: optionCount }).map((_, i) => {
-              const letter = letterFor(i);
-              const isSelected = (val || '').toUpperCase() === letter;
-              return (
-                <button
-                  key={letter}
-                  className={`mc-btn ${isSelected ? 'selected' : ''}`}
-                  onClick={() => saveAndAdvance(letter)}
-                >
-                  {letter}
-                </button>
-              );
-            })}
+          <div className="answer-input-wrap" style={{ alignItems: 'center' }}>
+            <label className="answer-input-label">Your answer</label>
+            <div className="mc-grid" data-count={optionCount}>
+              {Array.from({ length: optionCount }).map((_, i) => {
+                const letter = letterFor(i);
+                const isSelected = (val || '').toUpperCase() === letter;
+                return (
+                  <button
+                    key={letter}
+                    className={`mc-btn ${isSelected ? 'selected' : ''}`}
+                    onClick={() => setVal(letter)}
+                  >
+                    {letter}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="answer-hint">
+              Press <span className="kbd">A</span>–<span className="kbd">{letterFor(optionCount - 1)}</span> to pick, <span className="kbd">↵</span> to submit
+            </div>
           </div>
         ) : (
           <div className="answer-input-wrap">
@@ -417,12 +459,10 @@ function AnsweringPhase({ test, onUpdate, onFinishAnswering }) {
 
         <UnsureToggle checked={currentUnsure} onChange={setUnsure} />
 
-        {!isMc && (
-          <button className="btn-confirm" disabled={!val.trim()} onClick={submit}>
-            {isEditing ? 'Save & next' : cursor + 1 === total ? 'Submit & finish' : 'Submit & next'}{' '}
-            <Icon.Arrow />
-          </button>
-        )}
+        <button className="btn-confirm" disabled={!val.trim()} onClick={submit}>
+          {isEditing ? 'Save & next' : cursor + 1 === total ? 'Submit & finish' : 'Submit & next'}{' '}
+          <Icon.Arrow />
+        </button>
       </div>
 
       <div className="action-row">
@@ -580,13 +620,6 @@ function GradingPhase({ test, onUpdate, onFinish }) {
     [test, cursor, onUpdate]
   );
 
-  const toggleUnsure = () => {
-    const nextQs = test.questions.map((qq, i) =>
-      i === cursor ? { ...qq, unsure: !qq.unsure } : qq
-    );
-    onUpdate({ ...test, questions: nextQs });
-  };
-
   useEffect(() => {
     const handler = (e) => {
       if (e.target.matches('input, textarea')) return;
@@ -664,7 +697,7 @@ function GradingPhase({ test, onUpdate, onFinish }) {
         <div className="q-num-wrap" style={{ marginTop: -4 }}>
           <span className="q-num-label">
             Question {cursor + 1} of {total}
-            {currentUnsure && <span className="q-num-unsure-inline" title="Marked unsure">?</span>}
+            {currentUnsure && <span className="q-num-unsure-inline" title="Marked unsure during answering">?</span>}
           </span>
         </div>
 
@@ -676,8 +709,6 @@ function GradingPhase({ test, onUpdate, onFinish }) {
         </div>
 
         <SliderSwitch state={pending} onChange={setPending} />
-
-        <UnsureToggle checked={currentUnsure} onChange={toggleUnsure} />
 
         <button className="btn-confirm" disabled={pending === 'neutral'} onClick={() => apply(pending)}>
           {q.grade !== null ? 'Update' : 'Mark'} {pending === 'correct' ? 'correct' : pending === 'incorrect' ? 'incorrect' : ''}
@@ -731,13 +762,6 @@ function ReviewPhase({ test, onUpdate }) {
     onUpdate({ ...test, questions: nextQs });
   };
 
-  const toggleUnsure = (i) => {
-    const nextQs = test.questions.map((qq, idx) =>
-      idx === i ? { ...qq, unsure: !qq.unsure } : qq
-    );
-    onUpdate({ ...test, questions: nextQs });
-  };
-
   return (
     <div className="test-view review">
       <div className="review-top">
@@ -774,14 +798,8 @@ function ReviewPhase({ test, onUpdate }) {
               <div className="rr-num">{i + 1}</div>
               <div className={`rr-answer ${isSkipped ? 'skipped' : ''}`} title={q.answer || emptyAnswerLabel()}>
                 {isSkipped ? emptyAnswerLabel() : q.answer}
+                {isUnsure && <span className="rr-unsure-badge" title="You marked this unsure">?</span>}
               </div>
-              <button
-                className={`rr-unsure ${isUnsure ? 'on' : ''}`}
-                onClick={() => toggleUnsure(i)}
-                title={isUnsure ? 'Remove unsure flag' : 'Mark as unsure'}
-              >
-                ?
-              </button>
               <div className="rr-toggle">
                 <button
                   className={`rr-btn rr-x ${q.grade === false ? 'on' : ''}`}
