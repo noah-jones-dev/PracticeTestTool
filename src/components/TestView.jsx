@@ -410,10 +410,12 @@ function AnsweringPhase({ test, onUpdate, onFinishAnswering }) {
       <div className="qcard slide-enter" key={`a-${cursor}`}>
         <div className="qcard-bg" />
         <div className="q-num-wrap">
-          <span className="q-num-label">{isEditing ? 'Editing question' : 'Question'}</span>
-          <div className={`q-num ${bumpKey ? 'bump' : ''} ${currentUnsure ? 'unsure' : ''}`} key={bumpKey}>
+          <span className="q-num-label">
+            {isEditing ? 'Editing question' : 'Question'}
+            {currentUnsure && <span className="q-num-unsure-inline" title="Marked unsure">?</span>}
+          </span>
+          <div className={`q-num ${bumpKey ? 'bump' : ''}`} key={bumpKey}>
             {cursor + 1}<small>/ {total}</small>
-            {currentUnsure && <span className="q-num-unsure">?</span>}
           </div>
         </div>
 

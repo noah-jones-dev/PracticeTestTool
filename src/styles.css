@@ -1302,7 +1302,7 @@ input, textarea {
 .unsure-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   cursor: pointer;
   user-select: none;
   font-size: 12.5px;
@@ -1310,7 +1310,9 @@ input, textarea {
   color: var(--ink-3);
   text-transform: uppercase;
   letter-spacing: .04em;
-  padding: 6px 12px 6px 6px;
+  /* Symmetric padding with extra left so the `?` box doesn't crowd the
+     pill's curved edge. */
+  padding: 6px 16px 6px 8px;
   border-radius: 999px;
   border: 1.5px solid var(--hairline);
   background: var(--surface-2);
@@ -1324,6 +1326,7 @@ input, textarea {
 .unsure-toggle .unsure-box {
   width: 22px;
   height: 22px;
+  flex-shrink: 0;
   border-radius: 50%;
   background: var(--surface);
   border: 1.5px solid var(--hairline);
@@ -1333,7 +1336,7 @@ input, textarea {
   font-weight: 900;
   font-size: 13px;
   color: transparent;
-  transition: all .2s var(--spring);
+  transition: background .2s, border-color .2s, color .2s;
 }
 .unsure-toggle.on {
   background: #FFF4E1;
@@ -1344,31 +1347,17 @@ input, textarea {
   background: #F59E0B;
   border-color: #F59E0B;
   color: white;
-  transform: scale(1.05);
 }
 [data-theme="dark"] .unsure-toggle.on {
   background: #3A2C0E;
   color: #FBBF24;
 }
 
-/* Unsure indicator on big question number */
-.q-num-wrap { position: relative; }
-.q-num-unsure {
-  position: absolute;
-  top: -4px;
-  right: -22px;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  background: #F59E0B;
-  color: white;
-  font-size: 14px;
-  font-weight: 900;
+/* Inline "?" badge next to the q-num-label "Editing question" / "Question N of total" */
+.q-num-label {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  -webkit-text-fill-color: white;
-  box-shadow: 0 4px 10px rgba(245, 158, 11, .35);
+  gap: 8px;
 }
 .q-num-unsure-inline {
   display: inline-flex;
@@ -1381,8 +1370,12 @@ input, textarea {
   color: white;
   font-size: 11px;
   font-weight: 900;
-  margin-left: 8px;
-  vertical-align: middle;
+  flex-shrink: 0;
+  /* Avoid the parent's text-transform: uppercase widening the glyph */
+  text-transform: none;
+  letter-spacing: 0;
+  /* Lift the box-shadow inset so it never extends beyond the qcard edge */
+  box-shadow: 0 2px 6px rgba(245, 158, 11, .25);
 }
 
 /* QuestionNav unsure badge */
