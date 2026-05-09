@@ -2,6 +2,16 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Icon } from './Icons.jsx';
 import { AnimatedNumber, ScoreRing } from './AnimatedNumber.jsx';
 
+// ─── Helpers ───────────────────────────────────────────────────
+function letterFor(index) {
+  return String.fromCharCode(65 + index); // 0 -> A
+}
+
+function emptyAnswerLabel() {
+  return '— skipped —';
+}
+
+// ─── SliderSwitch ──────────────────────────────────────────────
 function SliderSwitch({ state, onChange, size = 'lg' }) {
   const handleClick = (e) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -26,6 +36,7 @@ function SliderSwitch({ state, onChange, size = 'lg' }) {
   );
 }
 
+// ─── StatsBlock ────────────────────────────────────────────────
 function StatsBlock({ correct, incorrect, total, ungraded, label }) {
   const graded = correct + incorrect;
   const pct = graded > 0 ? Math.round((correct / graded) * 100) : 0;
@@ -70,7 +81,8 @@ function StatsBlock({ correct, incorrect, total, ungraded, label }) {
   );
 }
 
-function QuestionNav({ total, current, getStatus, onJump }) {
+// ─── QuestionNav ───────────────────────────────────────────────
+function QuestionNav({ total, current, getStatus, isUnsure, onJump }) {
   const stripRef = useRef(null);
   const [maxVisible, setMaxVisible] = useState(total);
   const [jumpVal, setJumpVal] = useState('');
@@ -120,11 +132,12 @@ function QuestionNav({ total, current, getStatus, onJump }) {
           return (
             <button
               key={i}
-              className={`qchip s-${st} ${i === current ? 'on' : ''}`}
+              className={`qchip s-${st} ${i === current ? 'on' : ''} ${isUnsure?.(i) ? 'is-unsure' : ''}`}
               onClick={() => onJump(i)}
-              title={`Question ${i + 1}`}
+              title={`Question ${i + 1}${isUnsure?.(i) ? ' (unsure)' : ''}`}
             >
               {i + 1}
+              {isUnsure?.(i) && <span className="qchip-unsure">?</span>}
             </button>
           );
         })}
@@ -174,43 +187,130 @@ function QuestionNav({ total, current, getStatus, onJump }) {
   );
 }
 
+// ─── UnsureToggle ──────────────────────────────────────────────
+function UnsureToggle({ checked, onChange }) {
+  return (
+    <label className={`unsure-toggle ${checked ? 'on' : ''}`}>
+      <input
+        type="checkbox"
+        checked={!!checked}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+      <span className="unsure-box">{checked ? '?' : ''}</span>
+      <span className="unsure-label">Mark as unsure</span>
+    </label>
+  );
+}
+
+// ─── Phase 1: Answering ────────────────────────────────────────
 function AnsweringPhase({ test, onUpdate, onFinishAnswering }) {
   const total = test.totalQuestions;
-  const firstUnanswered = test.questions.length;
-  const [cursor, setCursor] = useState(Math.min(firstUnanswered, total - 1));
+  const isMc = test.questionType === 'mc';
+  const optionCount = test.optionCount || 4;
+
+  // Initial cursor: prefer test.editingIndex (set by FinalizePhase), else first unanswered slot
+  const initialCursor = (() => {
+    if (typeof test.editingIndex === 'number') {
+      return Math.min(test.editingIndex, total - 1);
+    }
+    // first slot with empty answer
+    for (let i = 0; i < test.questions.length; i++) {
+      if (!test.questions[i].answer) return i;
+    }
+    if (test.questions.length < total) return test.questions.length;
+    return total - 1;
+  })();
+
+  const [cursor, setCursor] = useState(initialCursor);
   const existing = test.questions[cursor];
   const [val, setVal] = useState(existing ? existing.answer : '');
   const [bumpKey, setBumpKey] = useState(0);
   const inputRef = useRef(null);
 
+  // Clear editingIndex on mount so it doesn't stick
+  useEffect(() => {
+    if (typeof test.editingIndex === 'number') {
+      onUpdate({ ...test, editingIndex: undefined });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     const ex = test.questions[cursor];
     setVal(ex ? ex.answer : '');
-    inputRef.current?.focus();
+    if (!isMc) inputRef.current?.focus();
     setBumpKey((k) => k + 1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cursor]);
 
+  const findNextSlot = (questions) => {
+    // first slot AFTER cursor with empty answer
+    for (let i = cursor + 1; i < questions.length; i++) {
+      if (!questions[i].answer) return i;
+    }
+    // else first unfilled appended slot
+    if (questions.length < total) return questions.length;
+    // else first slot BEFORE cursor with empty answer (wrap)
+    for (let i = 0; i < cursor; i++) {
+      if (!questions[i].answer) return i;
+    }
+    return -1;
+  };
+
+  // Save the current val (or a passed-in value) and advance.
+  const saveAndAdvance = (rawValue) => {
+    const value = (rawValue ?? '').toString();
+    let nextQs;
+    if (cursor < test.questions.length) {
+      nextQs = test.questions.map((q, i) =>
+        i === cursor ? { ...q, answer: value } : q
+      );
+    } else if (cursor === test.questions.length) {
+      nextQs = [...test.questions, { answer: value, grade: null, unsure: false }];
+    } else {
+      return;
+    }
+
+    const next = findNextSlot(nextQs);
+
+    // ATOMIC: when no more slots to visit, transition to finalize in the same update.
+    // This fixes the bug where the last-question save and phase-change were two
+    // separate updates and the phase-change closure had stale `test.questions`.
+    if (next === -1) {
+      onUpdate({ ...test, questions: nextQs, phase: 'finalize' });
+      return;
+    }
+
+    onUpdate({ ...test, questions: nextQs });
+    setCursor(next);
+  };
+
   const submit = () => {
     const trimmed = val.trim();
     if (!trimmed) return;
+    saveAndAdvance(trimmed);
+  };
+
+  const skip = () => {
+    saveAndAdvance('');
+  };
+
+  const setUnsure = (checked) => {
     let nextQs;
     if (cursor < test.questions.length) {
-      nextQs = test.questions.map((q, i) => (i === cursor ? { ...q, answer: trimmed } : q));
+      nextQs = test.questions.map((q, i) =>
+        i === cursor ? { ...q, unsure: checked } : q
+      );
     } else if (cursor === test.questions.length) {
-      nextQs = [...test.questions, { answer: trimmed, grade: null }];
+      // no slot yet — create one with empty answer + unsure flag
+      nextQs = [
+        ...test.questions,
+        { answer: '', grade: null, unsure: checked },
+      ];
     } else {
       return;
     }
     onUpdate({ ...test, questions: nextQs });
-    const nextUnanswered = nextQs.length < total ? nextQs.length : -1;
-    if (nextUnanswered !== -1 && nextUnanswered > cursor) {
-      setCursor(nextUnanswered);
-    } else if (cursor + 1 < total && cursor + 1 < nextQs.length) {
-      setCursor(cursor + 1);
-    } else if (nextQs.length >= total) {
-      setTimeout(() => onFinishAnswering(), 250);
-    }
   };
 
   const jumpTo = (i) => {
@@ -220,10 +320,15 @@ function AnsweringPhase({ test, onUpdate, onFinishAnswering }) {
 
   const getStatus = (i) => {
     if (i === cursor) return 'current';
-    if (i < test.questions.length) return 'answered';
+    if (i < test.questions.length) {
+      return test.questions[i].answer ? 'answered' : 'skipped';
+    }
     if (i === test.questions.length) return 'next';
     return 'locked';
   };
+
+  const isUnsure = (i) =>
+    i < test.questions.length && !!test.questions[i].unsure;
 
   const undo = () => {
     if (test.questions.length === 0) return;
@@ -231,8 +336,9 @@ function AnsweringPhase({ test, onUpdate, onFinishAnswering }) {
     setCursor(Math.min(cursor, test.questions.length - 1));
   };
 
-  const answered = test.questions.length;
+  const answered = test.questions.filter((q) => q.answer).length;
   const isEditing = cursor < test.questions.length;
+  const currentUnsure = !!(existing && existing.unsure);
 
   return (
     <div className="test-view">
@@ -242,6 +348,7 @@ function AnsweringPhase({ test, onUpdate, onFinishAnswering }) {
           <div className="sub">
             <span className="phase-chip phase-answer">Answering</span>
             Started {formatRelative(test.createdAt)} · {total} questions
+            {isMc ? ` · multiple choice (A–${letterFor(optionCount - 1)})` : ' · free input'}
           </div>
         </div>
         <div className="score-pill">
@@ -256,42 +363,74 @@ function AnsweringPhase({ test, onUpdate, onFinishAnswering }) {
         <span style={{ width: `${(answered / total) * 100}%` }} />
       </div>
 
-      <QuestionNav total={total} current={cursor} getStatus={getStatus} onJump={jumpTo} />
+      <QuestionNav
+        total={total}
+        current={cursor}
+        getStatus={getStatus}
+        isUnsure={isUnsure}
+        onJump={jumpTo}
+      />
 
       <div className="qcard slide-enter" key={`a-${cursor}`}>
         <div className="qcard-bg" />
         <div className="q-num-wrap">
           <span className="q-num-label">{isEditing ? 'Editing question' : 'Question'}</span>
-          <div className={`q-num ${bumpKey ? 'bump' : ''}`} key={bumpKey}>
+          <div className={`q-num ${bumpKey ? 'bump' : ''} ${currentUnsure ? 'unsure' : ''}`} key={bumpKey}>
             {cursor + 1}<small>/ {total}</small>
+            {currentUnsure && <span className="q-num-unsure">?</span>}
           </div>
         </div>
 
-        <div className="answer-input-wrap">
-          <label className="answer-input-label">Your answer</label>
-          <input
-            ref={inputRef}
-            className="answer-input"
-            value={val}
-            onChange={(e) => setVal(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && submit()}
-            placeholder="Type your answer…"
-            maxLength={200}
-          />
-          <div className="answer-hint">
-            Press <span className="kbd">↵</span> to {isEditing ? 'save & next' : 'submit and advance'}
+        {isMc ? (
+          <div className="mc-grid" data-count={optionCount}>
+            {Array.from({ length: optionCount }).map((_, i) => {
+              const letter = letterFor(i);
+              const isSelected = (val || '').toUpperCase() === letter;
+              return (
+                <button
+                  key={letter}
+                  className={`mc-btn ${isSelected ? 'selected' : ''}`}
+                  onClick={() => saveAndAdvance(letter)}
+                >
+                  {letter}
+                </button>
+              );
+            })}
           </div>
-        </div>
+        ) : (
+          <div className="answer-input-wrap">
+            <label className="answer-input-label">Your answer</label>
+            <input
+              ref={inputRef}
+              className="answer-input"
+              value={val}
+              onChange={(e) => setVal(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && submit()}
+              placeholder="Type your answer…"
+              maxLength={200}
+            />
+            <div className="answer-hint">
+              Press <span className="kbd">↵</span> to {isEditing ? 'save & next' : 'submit and advance'}
+            </div>
+          </div>
+        )}
 
-        <button className="btn-confirm" disabled={!val.trim()} onClick={submit}>
-          {isEditing ? 'Save & next' : cursor + 1 === total ? 'Submit & finish' : 'Submit & next'}{' '}
-          <Icon.Arrow />
-        </button>
+        <UnsureToggle checked={currentUnsure} onChange={setUnsure} />
+
+        {!isMc && (
+          <button className="btn-confirm" disabled={!val.trim()} onClick={submit}>
+            {isEditing ? 'Save & next' : cursor + 1 === total ? 'Submit & finish' : 'Submit & next'}{' '}
+            <Icon.Arrow />
+          </button>
+        )}
       </div>
 
       <div className="action-row">
         <div className="left">
-          <button className="btn-ghost" onClick={undo} disabled={answered === 0}>
+          <button className="btn-ghost" onClick={skip}>
+            Skip <Icon.Arrow />
+          </button>
+          <button className="btn-ghost" onClick={undo} disabled={answered === 0 && test.questions.length === 0}>
             <Icon.Undo /> Undo last
           </button>
         </div>
@@ -299,8 +438,8 @@ function AnsweringPhase({ test, onUpdate, onFinishAnswering }) {
           <button
             className="btn-ghost"
             onClick={onFinishAnswering}
-            disabled={answered === 0}
-            title={answered < total ? `Skip ahead to grading (${answered}/${total} answered)` : 'Continue to grading'}
+            disabled={test.questions.length === 0}
+            title="Review your answers before grading"
           >
             Done answering <Icon.Arrow />
           </button>
@@ -310,6 +449,100 @@ function AnsweringPhase({ test, onUpdate, onFinishAnswering }) {
   );
 }
 
+// ─── Phase 2: Finalize (review answers before grading) ─────────
+function FinalizePhase({ test, onUpdate, onSubmit, onBackToAnswering }) {
+  const total = test.totalQuestions;
+  const answered = test.questions.filter((q) => q.answer).length;
+  const skipped = total - answered;
+  const unsureCount = test.questions.filter((q) => q.unsure).length;
+
+  const editAt = (i) => {
+    onUpdate({ ...test, phase: 'answering', editingIndex: i });
+  };
+
+  const toggleUnsure = (i) => {
+    const nextQs = test.questions.map((q, idx) =>
+      idx === i ? { ...q, unsure: !q.unsure } : q
+    );
+    // Ensure we have a slot for every question up to i (for edge case where i was beyond)
+    onUpdate({ ...test, questions: nextQs });
+  };
+
+  return (
+    <div className="test-view finalize">
+      <div className="test-header">
+        <div className="th-title">
+          <h2>{test.title}</h2>
+          <div className="sub">
+            <span className="phase-chip phase-finalize">Finalize</span>
+            Review your answers before grading
+          </div>
+        </div>
+        <div className="score-pill">
+          <div>
+            <div className="num">{answered}/{total}</div>
+            <div className="lbl">Answered</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="finalize-summary">
+        <span className="fs answered"><strong>{answered}</strong> answered</span>
+        {skipped > 0 && <span className="fs skipped"><strong>{skipped}</strong> skipped</span>}
+        {unsureCount > 0 && <span className="fs unsure"><strong>{unsureCount}</strong> unsure</span>}
+      </div>
+
+      <div className="finalize-list">
+        {Array.from({ length: total }).map((_, i) => {
+          const q = test.questions[i];
+          const ans = q?.answer;
+          const isUnsure = !!q?.unsure;
+          const isSkipped = !ans;
+          return (
+            <div
+              key={i}
+              className={`finalize-row ${isSkipped ? 'skipped' : ''} ${isUnsure ? 'unsure' : ''}`}
+            >
+              <div className="fr-num">{i + 1}</div>
+              <div className="fr-answer">
+                {isSkipped ? <em>{emptyAnswerLabel()}</em> : ans}
+              </div>
+              <button
+                className={`fr-unsure ${isUnsure ? 'on' : ''}`}
+                onClick={() => toggleUnsure(i)}
+                title={isUnsure ? 'Remove unsure flag' : 'Mark as unsure'}
+              >
+                ?
+              </button>
+              <button
+                className="fr-edit"
+                onClick={() => editAt(i)}
+                title="Edit this answer"
+              >
+                Edit <Icon.Arrow />
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="action-row">
+        <div className="left">
+          <button className="btn-ghost" onClick={onBackToAnswering}>
+            <Icon.Arrow dir="left" /> Back to answering
+          </button>
+        </div>
+        <div className="right">
+          <button className="btn-primary" style={{ height: 42, padding: '0 18px' }} onClick={onSubmit}>
+            Submit & start grading <Icon.Arrow />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Phase 3: Grading ─────────────────────────────────────────
 function GradingPhase({ test, onUpdate, onFinish }) {
   const total = test.questions.length;
   const firstUngraded = test.questions.findIndex((q) => q.grade === null);
@@ -347,6 +580,13 @@ function GradingPhase({ test, onUpdate, onFinish }) {
     [test, cursor, onUpdate]
   );
 
+  const toggleUnsure = () => {
+    const nextQs = test.questions.map((qq, i) =>
+      i === cursor ? { ...qq, unsure: !qq.unsure } : qq
+    );
+    onUpdate({ ...test, questions: nextQs });
+  };
+
   useEffect(() => {
     const handler = (e) => {
       if (e.target.matches('input, textarea')) return;
@@ -381,6 +621,9 @@ function GradingPhase({ test, onUpdate, onFinish }) {
     return <ReviewPhase test={test} onUpdate={onUpdate} />;
   }
 
+  const currentUnsure = !!q.unsure;
+  const isSkipped = !q.answer;
+
   return (
     <div className="test-view">
       <div className="test-header">
@@ -412,21 +655,29 @@ function GradingPhase({ test, onUpdate, onFinish }) {
           if (g === false) return 'incorrect';
           return 'ungraded';
         }}
+        isUnsure={(i) => !!test.questions[i]?.unsure}
         onJump={setCursor}
       />
 
       <div className="qcard slide-enter" key={`g-${cursor}`} ref={cardRef}>
         <div className="qcard-bg" />
         <div className="q-num-wrap" style={{ marginTop: -4 }}>
-          <span className="q-num-label">Question {cursor + 1} of {total}</span>
+          <span className="q-num-label">
+            Question {cursor + 1} of {total}
+            {currentUnsure && <span className="q-num-unsure-inline" title="Marked unsure">?</span>}
+          </span>
         </div>
 
         <div className="answer-display">
           <div className="answer-display-label">Your answer</div>
-          <div className="answer-display-value">{q.answer}</div>
+          <div className={`answer-display-value ${isSkipped ? 'skipped' : ''}`}>
+            {isSkipped ? emptyAnswerLabel() : q.answer}
+          </div>
         </div>
 
         <SliderSwitch state={pending} onChange={setPending} />
+
+        <UnsureToggle checked={currentUnsure} onChange={toggleUnsure} />
 
         <button className="btn-confirm" disabled={pending === 'neutral'} onClick={() => apply(pending)}>
           {q.grade !== null ? 'Update' : 'Mark'} {pending === 'correct' ? 'correct' : pending === 'incorrect' ? 'incorrect' : ''}
@@ -466,6 +717,7 @@ function GradingPhase({ test, onUpdate, onFinish }) {
   );
 }
 
+// ─── Phase 4: Review (final results) ──────────────────────────
 function ReviewPhase({ test, onUpdate }) {
   const total = test.questions.length;
   const correct = test.questions.filter((q) => q.grade === true).length;
@@ -476,6 +728,13 @@ function ReviewPhase({ test, onUpdate }) {
 
   const toggle = (i, newGrade) => {
     const nextQs = test.questions.map((qq, idx) => (idx === i ? { ...qq, grade: newGrade } : qq));
+    onUpdate({ ...test, questions: nextQs });
+  };
+
+  const toggleUnsure = (i) => {
+    const nextQs = test.questions.map((qq, idx) =>
+      idx === i ? { ...qq, unsure: !qq.unsure } : qq
+    );
     onUpdate({ ...test, questions: nextQs });
   };
 
@@ -504,31 +763,44 @@ function ReviewPhase({ test, onUpdate }) {
       </div>
 
       <div className="review-list">
-        {test.questions.map((q, i) => (
-          <div
-            key={i}
-            className={`review-row grade-${q.grade === true ? 'correct' : q.grade === false ? 'incorrect' : 'none'}`}
-          >
-            <div className="rr-num">{i + 1}</div>
-            <div className="rr-answer" title={q.answer}>{q.answer}</div>
-            <div className="rr-toggle">
+        {test.questions.map((q, i) => {
+          const isUnsure = !!q.unsure;
+          const isSkipped = !q.answer;
+          return (
+            <div
+              key={i}
+              className={`review-row grade-${q.grade === true ? 'correct' : q.grade === false ? 'incorrect' : 'none'} ${isUnsure ? 'unsure' : ''}`}
+            >
+              <div className="rr-num">{i + 1}</div>
+              <div className={`rr-answer ${isSkipped ? 'skipped' : ''}`} title={q.answer || emptyAnswerLabel()}>
+                {isSkipped ? emptyAnswerLabel() : q.answer}
+              </div>
               <button
-                className={`rr-btn rr-x ${q.grade === false ? 'on' : ''}`}
-                onClick={() => toggle(i, false)}
-                title="Mark incorrect"
+                className={`rr-unsure ${isUnsure ? 'on' : ''}`}
+                onClick={() => toggleUnsure(i)}
+                title={isUnsure ? 'Remove unsure flag' : 'Mark as unsure'}
               >
-                <Icon.X s={14} />
+                ?
               </button>
-              <button
-                className={`rr-btn rr-c ${q.grade === true ? 'on' : ''}`}
-                onClick={() => toggle(i, true)}
-                title="Mark correct"
-              >
-                <Icon.Check s={14} />
-              </button>
+              <div className="rr-toggle">
+                <button
+                  className={`rr-btn rr-x ${q.grade === false ? 'on' : ''}`}
+                  onClick={() => toggle(i, false)}
+                  title="Mark incorrect"
+                >
+                  <Icon.X s={14} />
+                </button>
+                <button
+                  className={`rr-btn rr-c ${q.grade === true ? 'on' : ''}`}
+                  onClick={() => toggle(i, true)}
+                  title="Mark correct"
+                >
+                  <Icon.Check s={14} />
+                </button>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -566,11 +838,28 @@ function spawnBurst(isCorrect, cardRef) {
   }
 }
 
+// ─── Top-level routing by phase ────────────────────────────────
 export function TestView({ test, onUpdate }) {
   const setPhase = (phase) => onUpdate({ ...test, phase });
 
   if (test.phase === 'answering') {
-    return <AnsweringPhase test={test} onUpdate={onUpdate} onFinishAnswering={() => setPhase('grading')} />;
+    return (
+      <AnsweringPhase
+        test={test}
+        onUpdate={onUpdate}
+        onFinishAnswering={() => setPhase('finalize')}
+      />
+    );
+  }
+  if (test.phase === 'finalize') {
+    return (
+      <FinalizePhase
+        test={test}
+        onUpdate={onUpdate}
+        onSubmit={() => setPhase('grading')}
+        onBackToAnswering={() => setPhase('answering')}
+      />
+    );
   }
   if (test.phase === 'grading') {
     return <GradingPhase test={test} onUpdate={onUpdate} onFinish={() => setPhase('review')} />;

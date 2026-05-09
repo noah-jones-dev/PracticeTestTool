@@ -7,13 +7,16 @@ const ACCENT = '#4F46E5';
 function NewTestForm({ onCreate, onCancel, allowCancel }) {
   const [title, setTitle] = useState('');
   const [count, setCount] = useState(20);
+  const [questionType, setQuestionType] = useState('free');
+  const [optionCount, setOptionCount] = useState(4);
   const inputRef = useRef(null);
 
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
 
-  const presets = [10, 20, 30, 50, 100];
+  const presets = [10, 20, 30, 40, 50, 100];
+  const optionPresets = [3, 4, 5, 6];
   const valid = title.trim().length > 0 && count > 0 && count <= 500;
 
   const submit = () => {
@@ -25,6 +28,8 @@ function NewTestForm({ onCreate, onCancel, allowCancel }) {
       phase: 'answering',
       questions: [],
       createdAt: Date.now(),
+      questionType,
+      optionCount: questionType === 'mc' ? optionCount : null,
     });
   };
 
@@ -65,6 +70,35 @@ function NewTestForm({ onCreate, onCancel, allowCancel }) {
             ))}
           </div>
         </div>
+        <div className="field">
+          <label>Question type</label>
+          <div className="type-toggle">
+            <button
+              className={questionType === 'free' ? 'active' : ''}
+              onClick={() => setQuestionType('free')}
+            >
+              Free input
+            </button>
+            <button
+              className={questionType === 'mc' ? 'active' : ''}
+              onClick={() => setQuestionType('mc')}
+            >
+              Multiple choice
+            </button>
+          </div>
+        </div>
+        {questionType === 'mc' && (
+          <div className="field">
+            <label>Options per question</label>
+            <div className="q-presets">
+              {optionPresets.map((p) => (
+                <button key={p} className={optionCount === p ? 'active' : ''} onClick={() => setOptionCount(p)}>
+                  {p} (A–{String.fromCharCode(64 + p)})
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
           {allowCancel && (
             <button className="btn-ghost" style={{ flex: '0 0 auto' }} onClick={onCancel}>
@@ -113,16 +147,20 @@ export default function App() {
         title: 'AP Biology — Cell Division',
         totalQuestions: 25,
         phase: 'review',
-        questions: ans1.map((a, i) => ({ answer: a, grade: gr1[i] })),
+        questions: ans1.map((a, i) => ({ answer: a, grade: gr1[i], unsure: false })),
         createdAt: now - 1000 * 60 * 60 * 24 * 2,
+        questionType: 'mc',
+        optionCount: 4,
       },
       {
         id: 't-seed-2',
         title: 'LSAT Logic — Set 4',
         totalQuestions: 30,
         phase: 'answering',
-        questions: ans2.map((a) => ({ answer: a, grade: null })),
+        questions: ans2.map((a) => ({ answer: a, grade: null, unsure: false })),
         createdAt: now - 1000 * 60 * 30,
+        questionType: 'mc',
+        optionCount: 5,
       },
     ];
   });
@@ -230,7 +268,7 @@ export default function App() {
               <span className={`tab-phase-dot phase-${phase}`} title={phase} />
               <span className="tab-label">{t.title}</span>
               <span className="tab-pct">
-                {phase === 'answering'
+                {phase === 'answering' || phase === 'finalize'
                   ? `${answered}/${t.totalQuestions}`
                   : phase === 'grading'
                   ? `${graded}/${t.totalQuestions}`
