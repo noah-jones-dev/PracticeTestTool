@@ -11,6 +11,28 @@ function emptyAnswerLabel() {
   return '— skipped —';
 }
 
+// MC answers are stored as a sorted comma-joined string of letters
+// (e.g. "A" for single-select, "A,C" for multi-select).
+function parseMcLetters(val) {
+  return new Set(
+    (val || '').toUpperCase().split(',').map((s) => s.trim()).filter(Boolean)
+  );
+}
+
+function joinMcLetters(set) {
+  return Array.from(set).sort().join(',');
+}
+
+function toggleMcLetter(val, letter) {
+  const set = parseMcLetters(val);
+  if (set.has(letter)) set.delete(letter);
+  else set.add(letter);
+  return joinMcLetters(set);
+}
+
+const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent);
+const MULTI_KEY_LABEL = IS_MAC ? 'Cmd' : 'Ctrl';
+
 // ─── SliderSwitch ──────────────────────────────────────────────
 function SliderSwitch({ state, onChange, size = 'lg' }) {
   const handleClick = (e) => {
@@ -207,6 +229,12 @@ function AnsweringPhase({ test, onUpdate, onFinishAnswering }) {
   const total = test.totalQuestions;
   const isMc = test.questionType === 'mc';
   const optionCount = test.optionCount || 4;
+  const optionPresets = [3, 4, 5, 6];
+
+  const setOptionCount = (n) => {
+    if (n === optionCount) return;
+    onUpdate({ ...test, optionCount: n });
+  };
 
   // Initial cursor: prefer test.editingIndex (set by FinalizePhase), else first unanswered slot
   const initialCursor = (() => {
@@ -313,7 +341,11 @@ function AnsweringPhase({ test, onUpdate, onFinishAnswering }) {
           const code = k.charCodeAt(0);
           if (code >= 65 && code <= 64 + optionCount) {
             e.preventDefault();
-            setVal(k);
+            if (e.ctrlKey || e.metaKey) {
+              setVal(toggleMcLetter(valRef.current, k));
+            } else {
+              setVal(k);
+            }
             return;
           }
         }
@@ -421,16 +453,36 @@ function AnsweringPhase({ test, onUpdate, onFinishAnswering }) {
 
         {isMc ? (
           <div className="answer-input-wrap" style={{ alignItems: 'center' }}>
+            <div className="mc-options-control">
+              <span className="mc-options-label">Options</span>
+              {optionPresets.map((n) => (
+                <button
+                  key={n}
+                  className={`mc-options-btn ${optionCount === n ? 'active' : ''}`}
+                  onClick={() => setOptionCount(n)}
+                  title={`Switch to ${n} choices (A–${letterFor(n - 1)})`}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
             <label className="answer-input-label">Your answer</label>
             <div className="mc-grid" data-count={optionCount}>
               {Array.from({ length: optionCount }).map((_, i) => {
                 const letter = letterFor(i);
-                const isSelected = (val || '').toUpperCase() === letter;
+                const selectedSet = parseMcLetters(val);
+                const isSelected = selectedSet.has(letter);
                 return (
                   <button
                     key={letter}
                     className={`mc-btn ${isSelected ? 'selected' : ''}`}
-                    onClick={() => setVal(letter)}
+                    onClick={(e) => {
+                      if (e.ctrlKey || e.metaKey) {
+                        setVal(toggleMcLetter(val, letter));
+                      } else {
+                        setVal(letter);
+                      }
+                    }}
                   >
                     {letter}
                   </button>
@@ -438,7 +490,7 @@ function AnsweringPhase({ test, onUpdate, onFinishAnswering }) {
               })}
             </div>
             <div className="answer-hint">
-              Press <span className="kbd">A</span>–<span className="kbd">{letterFor(optionCount - 1)}</span> to pick, <span className="kbd">↵</span> to submit
+              Press <span className="kbd">A</span>–<span className="kbd">{letterFor(optionCount - 1)}</span> to pick, hold <span className="kbd">{MULTI_KEY_LABEL}</span> to select more than one, <span className="kbd">↵</span> to submit
             </div>
           </div>
         ) : (

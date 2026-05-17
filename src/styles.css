@@ -1298,6 +1298,44 @@ input, textarea {
   .mc-btn { height: 52px; font-size: 18px; }
 }
 
+.mc-options-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  align-self: center;
+}
+.mc-options-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--ink-3);
+  margin-right: 4px;
+}
+.mc-options-btn {
+  height: 26px;
+  min-width: 30px;
+  padding: 0 9px;
+  border-radius: 7px;
+  background: var(--surface-2);
+  border: 1px solid var(--hairline);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-2);
+  transition: all .15s;
+  font-variant-numeric: tabular-nums;
+}
+.mc-options-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.mc-options-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
 /* ───── Unsure toggle (in qcard) ───── */
 .unsure-toggle {
   display: inline-flex;
