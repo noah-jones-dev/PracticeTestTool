@@ -85,6 +85,18 @@ The app is unsigned, so first launch needs Right-click → Open → confirm "Ope
 
 When new changes land on `main`, pull them and rebuild from your existing clone — no need to reclone.
 
+### One-shot (Windows and macOS)
+
+```bash
+npm run Update_App
+```
+
+This single command does everything: `git pull`, `npm install`, the platform build, and replaces your installed app (`%LOCALAPPDATA%\Programs\Practice Test` on Windows, `/Applications/Practice Test.app` on macOS). On Windows it also re-runs the `rcedit` icon embed. Quit Practice Test before running it.
+
+### Manual steps
+
+If you'd rather run each step yourself:
+
 ```bash
 git pull
 npm install

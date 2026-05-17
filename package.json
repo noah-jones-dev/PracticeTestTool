@@ -11,7 +11,8 @@
     "build": "vite build",
     "build:mac": "npm run build && electron-builder --mac",
     "build:win": "npm run build && electron-builder --win",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "Update_App": "node scripts/update-app.js"
   },
   "dependencies": {
     "react": "^18.3.1",
