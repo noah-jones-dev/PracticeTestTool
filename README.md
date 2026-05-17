@@ -81,6 +81,48 @@ Produces `dist/Practice Test-1.0.0.dmg`. Open it, drag `Practice Test.app` to Ap
 
 The app is unsigned, so first launch needs Right-click → Open → confirm "Open" once.
 
+## Updating
+
+When new changes land on `main`, pull them and rebuild from your existing clone — no need to reclone.
+
+```bash
+git pull
+npm install
+```
+
+Then rebuild for your platform.
+
+### Windows 11
+
+```powershell
+npm run build:win
+```
+
+Re-run the `rcedit` icon-embedding snippet from the Windows install section above so the new exes get the proper icon.
+
+Then update your existing install:
+
+- **If you used the NSIS installer:** quit Practice Test, then double-click `dist\Practice Test Setup 1.0.0.exe`. It upgrades in place and keeps your saved tests (`localStorage` is preserved).
+- **If you used the manual copy method:** quit Practice Test, then re-copy the unpacked folder over:
+
+  ```powershell
+  Copy-Item -Recurse -Force "dist\win-unpacked\*" "$env:LOCALAPPDATA\Programs\Practice Test"
+  ```
+
+  The shortcut on your desktop keeps working — it points at the same path.
+
+If the copy fails with "file in use", Practice Test is still running. Close it from the taskbar (or `taskkill /IM "Practice Test.exe" /F`) and try again.
+
+### macOS
+
+Must be rebuilt **on a Mac**.
+
+```bash
+npm run build:mac
+```
+
+Quit Practice Test, then open `dist/Practice Test-1.0.0.dmg` and drag `Practice Test.app` to Applications — confirm "Replace" when prompted. Your saved tests are preserved.
+
 ## Layout
 
 - `electron/main.cjs` — Electron main process (window creation, OS chrome, AppUserModelID)
