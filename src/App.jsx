@@ -4,11 +4,12 @@ import { TestView } from './components/TestView.jsx';
 
 const ACCENT = '#4F46E5';
 
-function NewTestForm({ onCreate, onCancel, allowCancel }) {
-  const [title, setTitle] = useState('');
-  const [count, setCount] = useState(20);
-  const [questionType, setQuestionType] = useState('free');
-  const [optionCount, setOptionCount] = useState(4);
+function NewTestForm({ onCreate, onCancel, allowCancel, editingTest }) {
+  const isEditing = !!editingTest;
+  const [title, setTitle] = useState(editingTest?.title ?? '');
+  const [count, setCount] = useState(editingTest?.totalQuestions ?? 20);
+  const [questionType, setQuestionType] = useState(editingTest?.questionType ?? 'free');
+  const [optionCount, setOptionCount] = useState(editingTest?.optionCount ?? 4);
   const inputRef = useRef(null);
 
   useEffect(() => {
@@ -21,6 +22,16 @@ function NewTestForm({ onCreate, onCancel, allowCancel }) {
 
   const submit = () => {
     if (!valid) return;
+    if (isEditing) {
+      onCreate({
+        ...editingTest,
+        title: title.trim(),
+        totalQuestions: count,
+        questionType,
+        optionCount: questionType === 'mc' ? optionCount : null,
+      });
+      return;
+    }
     onCreate({
       id: `t-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       title: title.trim(),
@@ -176,6 +187,7 @@ export default function App() {
   });
 
   const [creating, setCreating] = useState(false);
+  const [editingId, setEditingId] = useState(null);
   const [toast, setToast] = useState(null);
   const lastDeleted = useRef(null);
 
@@ -218,6 +230,11 @@ export default function App() {
     setCreating(false);
   };
 
+  const saveEditedTest = (test) => {
+    setTests((ts) => ts.map((t) => (t.id === test.id ? test : t)));
+    setEditingId(null);
+  };
+
   const undoDelete = () => {
     if (!lastDeleted.current) return;
     const { test, index } = lastDeleted.current;
@@ -244,7 +261,8 @@ export default function App() {
     setTimeout(() => setToast(null), 4500);
   };
 
-  const showCreateScreen = creating || tests.length === 0 || !activeTest;
+  const editingTest = editingId ? tests.find((t) => t.id === editingId) : null;
+  const showCreateScreen = creating || !!editingTest || tests.length === 0 || !activeTest;
 
   return (
     <div className="app">
@@ -293,15 +311,23 @@ export default function App() {
       </div>
 
       <div className="pane">
-        <div className="pane-inner" key={creating ? 'new' : activeId}>
+        <div className="pane-inner" key={creating ? 'new' : editingId ? `edit-${editingId}` : activeId}>
           {showCreateScreen ? (
             <NewTestForm
-              onCreate={createTest}
-              onCancel={() => setCreating(false)}
+              onCreate={editingTest ? saveEditedTest : createTest}
+              onCancel={() => {
+                setCreating(false);
+                setEditingId(null);
+              }}
               allowCancel={tests.length > 0}
+              editingTest={editingTest}
             />
           ) : (
-            <TestView test={activeTest} onUpdate={updateTest} />
+            <TestView
+              test={activeTest}
+              onUpdate={updateTest}
+              onEditTest={() => setEditingId(activeTest.id)}
+            />
           )}
         </div>
 

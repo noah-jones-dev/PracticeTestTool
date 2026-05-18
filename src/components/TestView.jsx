@@ -33,6 +33,148 @@ function toggleMcLetter(val, letter) {
 const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent);
 const MULTI_KEY_LABEL = IS_MAC ? 'Cmd' : 'Ctrl';
 
+function getQuestionOverride(test, index) {
+  return (test.questionOverrides && test.questionOverrides[index]) || {};
+}
+
+function effectiveTypeFor(test, index) {
+  return getQuestionOverride(test, index).questionType ?? test.questionType;
+}
+
+function effectiveOptionCountFor(test, index) {
+  return getQuestionOverride(test, index).optionCount ?? test.optionCount ?? 4;
+}
+
+function setQuestionOverride(test, index, patch) {
+  const overrides = { ...(test.questionOverrides || {}) };
+  const merged = { ...(overrides[index] || {}), ...patch };
+  const matchesDefault =
+    (merged.questionType === undefined || merged.questionType === test.questionType) &&
+    (merged.optionCount === undefined || merged.optionCount === (test.optionCount ?? 4));
+  if (matchesDefault) delete overrides[index];
+  else overrides[index] = merged;
+  return { ...test, questionOverrides: overrides };
+}
+
+function useOutsideClose(ref, onClose, enabled) {
+  useEffect(() => {
+    if (!enabled) return;
+    const onDown = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) onClose();
+    };
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [ref, onClose, enabled]);
+}
+
+function TestHeaderEllipsis({ onEditTest }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useOutsideClose(ref, () => setOpen(false), open);
+  if (!onEditTest) return null;
+  return (
+    <div className="header-ellipsis" ref={ref}>
+      <button
+        className="ellipsis-btn"
+        onClick={() => setOpen((o) => !o)}
+        title="More options"
+        aria-label="More options"
+      >
+        ⋯
+      </button>
+      {open && (
+        <div className="ellipsis-menu">
+          <button
+            className="ellipsis-menu-item"
+            onClick={() => { setOpen(false); onEditTest(); }}
+          >
+            Edit test settings
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function QuestionOptionsEllipsis({ test, cursor, onUpdate }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useOutsideClose(ref, () => setOpen(false), open);
+  const effType = effectiveTypeFor(test, cursor);
+  const effOpts = effectiveOptionCountFor(test, cursor);
+  const optionPresets = [3, 4, 5, 6];
+
+  const setType = (qt) => {
+    onUpdate(setQuestionOverride(test, cursor, { questionType: qt }));
+  };
+  const setOpts = (n) => {
+    onUpdate(setQuestionOverride(test, cursor, { optionCount: n }));
+  };
+  const resetToDefault = () => {
+    onUpdate(setQuestionOverride(test, cursor, { questionType: undefined, optionCount: undefined }));
+  };
+
+  const isOverridden = !!(test.questionOverrides && test.questionOverrides[cursor]);
+
+  return (
+    <div className="question-ellipsis" ref={ref}>
+      <button
+        className="ellipsis-btn"
+        onClick={() => setOpen((o) => !o)}
+        title="Edit this question"
+        aria-label="Edit this question"
+      >
+        ⋯
+      </button>
+      {open && (
+        <div className="ellipsis-menu question-menu">
+          <div className="ellipsis-menu-label">Question {cursor + 1} type</div>
+          <div className="ellipsis-menu-row">
+            <button
+              className={`ellipsis-pill ${effType === 'free' ? 'active' : ''}`}
+              onClick={() => setType('free')}
+            >
+              Free input
+            </button>
+            <button
+              className={`ellipsis-pill ${effType === 'mc' ? 'active' : ''}`}
+              onClick={() => setType('mc')}
+            >
+              Multiple choice
+            </button>
+          </div>
+          {effType === 'mc' && (
+            <>
+              <div className="ellipsis-menu-label">Options for this question</div>
+              <div className="ellipsis-menu-row">
+                {optionPresets.map((n) => (
+                  <button
+                    key={n}
+                    className={`ellipsis-pill ${effOpts === n ? 'active' : ''}`}
+                    onClick={() => setOpts(n)}
+                  >
+                    {n}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+          {isOverridden && (
+            <button className="ellipsis-menu-reset" onClick={resetToDefault}>
+              Use test default
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── SliderSwitch ──────────────────────────────────────────────
 function SliderSwitch({ state, onChange, size = 'lg' }) {
   const handleClick = (e) => {
@@ -225,16 +367,9 @@ function UnsureToggle({ checked, onChange }) {
 }
 
 // ─── Phase 1: Answering ────────────────────────────────────────
-function AnsweringPhase({ test, onUpdate, onFinishAnswering }) {
+function AnsweringPhase({ test, onUpdate, onFinishAnswering, onEditTest }) {
   const total = test.totalQuestions;
-  const isMc = test.questionType === 'mc';
-  const optionCount = test.optionCount || 4;
   const optionPresets = [3, 4, 5, 6];
-
-  const setOptionCount = (n) => {
-    if (n === optionCount) return;
-    onUpdate({ ...test, optionCount: n });
-  };
 
   // Initial cursor: prefer test.editingIndex (set by FinalizePhase), else first unanswered slot
   const initialCursor = (() => {
@@ -256,6 +391,15 @@ function AnsweringPhase({ test, onUpdate, onFinishAnswering }) {
   const inputRef = useRef(null);
   const valRef = useRef(val);
   valRef.current = val;
+
+  const isMc = effectiveTypeFor(test, cursor) === 'mc';
+  const optionCount = effectiveOptionCountFor(test, cursor);
+  const testOptionCount = test.optionCount ?? 4;
+
+  const setOptionCount = (n) => {
+    if (n === testOptionCount) return;
+    onUpdate({ ...test, optionCount: n });
+  };
 
   // Clear editingIndex on mount so it doesn't stick
   useEffect(() => {
@@ -419,11 +563,14 @@ function AnsweringPhase({ test, onUpdate, onFinishAnswering }) {
             {isMc ? ` · multiple choice (A–${letterFor(optionCount - 1)})` : ' · free input'}
           </div>
         </div>
-        <div className="score-pill">
-          <div>
-            <div className="num"><AnimatedNumber value={answered} />/{total}</div>
-            <div className="lbl">Answered</div>
+        <div className="th-right">
+          <div className="score-pill">
+            <div>
+              <div className="num"><AnimatedNumber value={answered} />/{total}</div>
+              <div className="lbl">Answered</div>
+            </div>
           </div>
+          <TestHeaderEllipsis onEditTest={onEditTest} />
         </div>
       </div>
 
@@ -441,6 +588,9 @@ function AnsweringPhase({ test, onUpdate, onFinishAnswering }) {
 
       <div className="qcard slide-enter" key={`a-${cursor}`}>
         <div className="qcard-bg" />
+        <div className="qcard-corner">
+          <QuestionOptionsEllipsis test={test} cursor={cursor} onUpdate={onUpdate} />
+        </div>
         <div className="q-num-wrap">
           <span className="q-num-label">
             {isEditing ? 'Editing question' : 'Question'}
@@ -458,7 +608,7 @@ function AnsweringPhase({ test, onUpdate, onFinishAnswering }) {
               {optionPresets.map((n) => (
                 <button
                   key={n}
-                  className={`mc-options-btn ${optionCount === n ? 'active' : ''}`}
+                  className={`mc-options-btn ${testOptionCount === n ? 'active' : ''}`}
                   onClick={() => setOptionCount(n)}
                   title={`Switch to ${n} choices (A–${letterFor(n - 1)})`}
                 >
@@ -544,7 +694,7 @@ function AnsweringPhase({ test, onUpdate, onFinishAnswering }) {
 }
 
 // ─── Phase 2: Finalize (review answers before grading) ─────────
-function FinalizePhase({ test, onUpdate, onSubmit, onBackToAnswering }) {
+function FinalizePhase({ test, onUpdate, onSubmit, onBackToAnswering, onEditTest }) {
   const total = test.totalQuestions;
   const answered = test.questions.filter((q) => q.answer).length;
   const skipped = total - answered;
@@ -572,11 +722,14 @@ function FinalizePhase({ test, onUpdate, onSubmit, onBackToAnswering }) {
             Review your answers before grading
           </div>
         </div>
-        <div className="score-pill">
-          <div>
-            <div className="num">{answered}/{total}</div>
-            <div className="lbl">Answered</div>
+        <div className="th-right">
+          <div className="score-pill">
+            <div>
+              <div className="num">{answered}/{total}</div>
+              <div className="lbl">Answered</div>
+            </div>
           </div>
+          <TestHeaderEllipsis onEditTest={onEditTest} />
         </div>
       </div>
 
@@ -637,7 +790,7 @@ function FinalizePhase({ test, onUpdate, onSubmit, onBackToAnswering }) {
 }
 
 // ─── Phase 3: Grading ─────────────────────────────────────────
-function GradingPhase({ test, onUpdate, onFinish }) {
+function GradingPhase({ test, onUpdate, onFinish, onEditTest }) {
   const total = test.questions.length;
   const firstUngraded = test.questions.findIndex((q) => q.grade === null);
   const [cursor, setCursor] = useState(firstUngraded === -1 ? 0 : firstUngraded);
@@ -721,12 +874,15 @@ function GradingPhase({ test, onUpdate, onFinish }) {
             {allGraded ? 'All graded — review or finish' : `${ungraded} of ${total} left to grade`}
           </div>
         </div>
-        <div className="score-pill">
-          <ScoreRing correct={correct} incorrect={incorrect} total={total} size={32} stroke={5} />
-          <div>
-            <div className="num">{correct + incorrect}/{total}</div>
-            <div className="lbl">Graded</div>
+        <div className="th-right">
+          <div className="score-pill">
+            <ScoreRing correct={correct} incorrect={incorrect} total={total} size={32} stroke={5} />
+            <div>
+              <div className="num">{correct + incorrect}/{total}</div>
+              <div className="lbl">Graded</div>
+            </div>
           </div>
+          <TestHeaderEllipsis onEditTest={onEditTest} />
         </div>
       </div>
 
@@ -911,7 +1067,7 @@ function spawnBurst(isCorrect, cardRef) {
 }
 
 // ─── Top-level routing by phase ────────────────────────────────
-export function TestView({ test, onUpdate }) {
+export function TestView({ test, onUpdate, onEditTest }) {
   const setPhase = (phase) => onUpdate({ ...test, phase });
 
   if (test.phase === 'answering') {
@@ -920,6 +1076,7 @@ export function TestView({ test, onUpdate }) {
         test={test}
         onUpdate={onUpdate}
         onFinishAnswering={() => setPhase('finalize')}
+        onEditTest={onEditTest}
       />
     );
   }
@@ -930,11 +1087,12 @@ export function TestView({ test, onUpdate }) {
         onUpdate={onUpdate}
         onSubmit={() => setPhase('grading')}
         onBackToAnswering={() => setPhase('answering')}
+        onEditTest={onEditTest}
       />
     );
   }
   if (test.phase === 'grading') {
-    return <GradingPhase test={test} onUpdate={onUpdate} onFinish={() => setPhase('review')} />;
+    return <GradingPhase test={test} onUpdate={onUpdate} onFinish={() => setPhase('review')} onEditTest={onEditTest} />;
   }
   return <ReviewPhase test={test} onUpdate={onUpdate} />;
 }
